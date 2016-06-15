@@ -3,32 +3,23 @@
  */
 package akka.remote.artery
 
-import java.net.InetAddress
 import java.util.concurrent.Executors
-import scala.collection.AbstractIterator
-import scala.concurrent.Await
+import java.util.concurrent.atomic.AtomicLongArray
+import java.util.concurrent.locks.LockSupport
+
 import scala.concurrent.duration._
+
 import akka.actor._
 import akka.remote.testconductor.RoleName
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.remote.testkit.STMultiNodeSpec
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.Source
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
 import io.aeron.Aeron
 import io.aeron.driver.MediaDriver
-import java.util.concurrent.CyclicBarrier
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLongArray
 import org.HdrHistogram.Histogram
-import akka.stream.ThrottleMode
-import java.io.StringWriter
-import java.io.PrintStream
-import java.io.OutputStreamWriter
-import java.io.BufferedOutputStream
-import java.io.ByteArrayOutputStream
 
 object LatencySpec extends MultiNodeConfig {
   val first = role("first")
@@ -86,6 +77,7 @@ object LatencySpec extends MultiNodeConfig {
     import settings._
 
     var count = 0
+    var startTime = System.nanoTime()
 
     def receive = {
       case bytes: Array[Byte] ⇒
@@ -95,12 +87,12 @@ object LatencySpec extends MultiNodeConfig {
         val d = System.nanoTime() - sendTimes.get(count - 1)
         histogram.recordValue(d)
         if (count == totalMessages) {
-          printTotal(testName, bytes.length, histogram)
+          printTotal(testName, bytes.length, histogram, System.nanoTime() - startTime)
           context.stop(self)
         }
     }
 
-    def printTotal(testName: String, payloadSize: Long, histogram: Histogram): Unit = {
+    def printTotal(testName: String, payloadSize: Long, histogram: Histogram, totalDurationNanos: Long): Unit = {
       import scala.collection.JavaConverters._
       val percentiles = histogram.percentiles(5)
       def percentile(p: Double): Double =
@@ -109,10 +101,13 @@ object LatencySpec extends MultiNodeConfig {
             value.getPercentileLevelIteratedTo < (p + 0.5) ⇒ value.getValueIteratedTo / 1000.0
         }.getOrElse(Double.NaN)
 
+      val throughput = 1000.0 * histogram.getTotalCount / totalDurationNanos.nanos.toMillis
+
       println(s"=== Latency $testName: RTT " +
         f"50%%ile: ${percentile(50.0)}%.0f µs, " +
         f"90%%ile: ${percentile(90.0)}%.0f µs, " +
-        f"99%%ile: ${percentile(99.0)}%.0f µs, ")
+        f"99%%ile: ${percentile(99.0)}%.0f µs, " +
+        f"rate: ${throughput}%,.0f msg/s")
       println("Histogram of RTT latencies in microseconds.")
       histogram.outputPercentileDistribution(System.out, 1000.0)
 
@@ -202,6 +197,11 @@ abstract class LatencySpec
       payloadSize = 100,
       repeat = repeatCount),
     TestSettings(
+      testName = "rate-20000-size-100",
+      messageRate = 20000,
+      payloadSize = 100,
+      repeat = repeatCount),
+    TestSettings(
       testName = "rate-1000-size-1k",
       messageRate = 1000,
       payloadSize = 1000,
@@ -227,12 +227,28 @@ abstract class LatencySpec
         histogram.reset()
         val receiver = system.actorOf(receiverProps(rep, testSettings, totalMessages, sendTimes, histogram, plotProbe.ref))
 
-        Source(1 to totalMessages)
-          .throttle(messageRate, 1.second, math.max(messageRate / 10, 1), ThrottleMode.Shaping)
-          .runForeach { n ⇒
-            sendTimes.set(n - 1, System.nanoTime())
-            echo.tell(payload, receiver)
+        var i = 0
+        var adjust = 0L
+        // increase the rate somewhat to compensate for overhead, based on heuristics
+        val adjustRateFactor =
+          if (messageRate <= 100) 1.05
+          else if (messageRate <= 1000) 1.1
+          else if (messageRate <= 10000) 1.2
+          else if (messageRate <= 20000) 1.3
+          else 1.4
+        val targetDelay = (SECONDS.toNanos(1) / (messageRate * adjustRateFactor)).toLong
+        while (i < totalMessages) {
+          LockSupport.parkNanos(targetDelay - adjust)
+          val now = System.nanoTime()
+          sendTimes.set(i, now)
+          if (i >= 1) {
+            val diff = now - sendTimes.get(i - 1)
+            adjust = math.max(0L, (diff - targetDelay) / 2)
           }
+
+          echo.tell(payload, receiver)
+          i += 1
+        }
 
         watch(receiver)
         expectTerminated(receiver, ((totalMessages / messageRate) + 10).seconds)
