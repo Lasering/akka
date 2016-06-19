@@ -189,8 +189,18 @@ object MaxThroughputSpec extends MultiNodeConfig {
         case FlowControlManifest ⇒ FlowControl(buf.getLong)
       }
 
-    override def toBinary(o: AnyRef): Array[Byte] = ???
-    override def fromBinary(bytes: Array[Byte], manifest: String): AnyRef = ???
+    override def toBinary(o: AnyRef): Array[Byte] = o match {
+      case FlowControl(burstStartTime) ⇒
+        val buf = ByteBuffer.allocate(8)
+        toBinary(o, buf)
+        buf.flip()
+        val bytes = Array.ofDim[Byte](buf.remaining)
+        buf.get(bytes)
+        bytes
+    }
+
+    override def fromBinary(bytes: Array[Byte], manifest: String): AnyRef =
+      fromBinary(ByteBuffer.wrap(bytes), manifest)
   }
 
 }

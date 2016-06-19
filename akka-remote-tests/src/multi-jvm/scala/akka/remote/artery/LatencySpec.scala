@@ -17,8 +17,6 @@ import akka.remote.testkit.STMultiNodeSpec
 import akka.stream.ActorMaterializer
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
-import io.aeron.Aeron
-import io.aeron.driver.MediaDriver
 import org.HdrHistogram.Histogram
 
 object LatencySpec extends MultiNodeConfig {
@@ -120,10 +118,10 @@ object LatencySpec extends MultiNodeConfig {
   }
 
   final case class TestSettings(
-    testName:    String,
+    testName: String,
     messageRate: Int, // msg/s
     payloadSize: Int,
-    repeat:      Int)
+    repeat: Int)
 
 }
 
@@ -141,22 +139,10 @@ abstract class LatencySpec
 
   var plots = LatencyPlots()
 
-  val aeron = {
-    val ctx = new Aeron.Context
-    val driver = MediaDriver.launchEmbedded()
-    ctx.aeronDirectoryName(driver.aeronDirectoryName)
-    Aeron.connect(ctx)
-  }
-
   lazy implicit val mat = ActorMaterializer()(system)
   import system.dispatcher
 
   override def initialParticipants = roles.size
-
-  def channel(roleName: RoleName) = {
-    val a = node(roleName).address
-    s"aeron:udp?endpoint=${a.host.get}:${a.port.get}"
-  }
 
   lazy val reporterExecutor = Executors.newFixedThreadPool(1)
   def reporter(name: String): TestRateReporter = {
@@ -181,6 +167,11 @@ abstract class LatencySpec
   }
 
   val scenarios = List(
+    TestSettings(
+      testName = "warmup",
+      messageRate = 10000,
+      payloadSize = 100,
+      repeat = repeatCount),
     TestSettings(
       testName = "rate-100-size-100",
       messageRate = 100,
