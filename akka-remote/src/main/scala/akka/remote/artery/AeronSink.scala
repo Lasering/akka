@@ -99,11 +99,12 @@ class AeronSink(
       private val spinning = 1000
       private var backoffCount = spinning
       private var lastMsgSize = 0
-      private val offerTask = new OfferTask(pub, null, lastMsgSize, getAsyncCallback(_ ⇒ onOfferSuccess()),
+      private val offerTask = new OfferTask(pub, null, lastMsgSize, getAsyncCallback(_ ⇒ taskOnOfferSuccess()),
         giveUpSendAfter, getAsyncCallback(_ ⇒ onGiveUp()))
       private val addOfferTask: Add = Add(offerTask)
 
       private var offerTaskInProgress = false
+      private var delegateTaskStartTime = 0L
 
       private val channelMetadata = channel.getBytes("US-ASCII")
 
@@ -146,12 +147,18 @@ class AeronSink(
             // visibility of these assignments are ensured by adding the task to the command queue
             offerTask.buffer = envelopeInFlight.aeronBuffer
             offerTask.msgSize = lastMsgSize
+            delegateTaskStartTime = System.nanoTime()
             taskRunner.command(addOfferTask)
             flightRecorder.hiFreq(AeronSink_DelegateToTaskRunner, lastMsgSize)
           }
         } else {
           onOfferSuccess()
         }
+      }
+
+      private def taskOnOfferSuccess(): Unit = {
+        flightRecorder.hiFreq(AeronSink_ReturnFromTaskRunner, System.nanoTime() - delegateTaskStartTime)
+        onOfferSuccess()
       }
 
       private def onOfferSuccess(): Unit = {

@@ -28,11 +28,13 @@ object FlightRecorderEvents {
   val AeronSink_EnvelopeOffered = 18
   val AeronSink_GaveUpEnvelope = 19
   val AeronSink_DelegateToTaskRunner = 20
+  val AeronSink_ReturnFromTaskRunner = 21
 
   // Aeron Source events
-  val AeronSource_Started = 21
-  val AeronSource_Stopped = 22
-  val AeronSource_Received = 23
-  val AeronSource_DelegateToTaskRunner = 24
+  val AeronSource_Started = 22
+  val AeronSource_Stopped = 23
+  val AeronSource_Received = 24
+  val AeronSource_DelegateToTaskRunner = 25
+  val AeronSource_ReturnFromTaskRunner = 26
 
 }

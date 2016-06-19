@@ -43,7 +43,7 @@ object AeronSource {
   class MessageHandler(pool: EnvelopeBufferPool) {
     def reset(): Unit = messageReceived = null
 
-    var messageReceived: EnvelopeBuffer = null
+    private[remote] var messageReceived: EnvelopeBuffer = null
 
     val fragmentsHandler = new Fragments(data ⇒ messageReceived = data, pool)
   }
@@ -82,16 +82,12 @@ class AeronSource(
       private val sub = aeron.addSubscription(channel, streamId)
       // FIXME measure and adjust with IdleCpuLevel
       private val spinning = 1000
-      private val yielding = 0
-      private val parking = 0
-      private val idleStrategy = new BackoffIdleStrategy(
-        spinning, yielding, TimeUnit.MICROSECONDS.toNanos(1), TimeUnit.MICROSECONDS.toNanos(100))
-      private val idleStrategyRetries = spinning + yielding + parking
-      private var backoffCount = idleStrategyRetries
+      private var backoffCount = spinning
+      private var delegateTaskStartTime = 0L
 
       // the fragmentHandler is called from `poll` in same thread, i.e. no async callback is needed
       private val messageHandler = new MessageHandler(pool)
-      private val addPollTask: Add = Add(pollTask(sub, messageHandler, getAsyncCallback(onMessage)))
+      private val addPollTask: Add = Add(pollTask(sub, messageHandler, getAsyncCallback(taskOnMessage)))
 
       private val channelMetadata = channel.getBytes("US-ASCII")
 
@@ -107,8 +103,7 @@ class AeronSource(
 
       // OutHandler
       override def onPull(): Unit = {
-        idleStrategy.reset()
-        backoffCount = idleStrategyRetries
+        backoffCount = spinning
         subscriberLoop()
       }
 
@@ -126,14 +121,19 @@ class AeronSource(
           // TODO the backoff strategy should be measured and tuned
           backoffCount -= 1
           if (backoffCount > 0) {
-            idleStrategy.idle()
             subscriberLoop() // recursive
           } else {
             // delegate backoff to shared TaskRunner
             flightRecorder.hiFreq(AeronSource_DelegateToTaskRunner, 0)
+            delegateTaskStartTime = System.nanoTime()
             taskRunner.command(addPollTask)
           }
         }
+      }
+
+      private def taskOnMessage(data: EnvelopeBuffer): Unit = {
+        flightRecorder.hiFreq(AeronSource_ReturnFromTaskRunner, System.nanoTime() - delegateTaskStartTime)
+        onMessage(data)
       }
 
       private def onMessage(data: EnvelopeBuffer): Unit = {

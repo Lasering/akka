@@ -76,6 +76,7 @@ object LatencySpec extends MultiNodeConfig {
 
     var count = 0
     var startTime = System.nanoTime()
+    val taskRunnerMetrics = new TaskRunnerMetrics(context.system)
 
     def receive = {
       case bytes: Array[Byte] ⇒
@@ -109,6 +110,8 @@ object LatencySpec extends MultiNodeConfig {
       println("Histogram of RTT latencies in microseconds.")
       histogram.outputPercentileDistribution(System.out, 1000.0)
 
+      taskRunnerMetrics.printHistograms()
+
       val plots = LatencyPlots(
         PlotResult().add(testName, percentile(50.0)),
         PlotResult().add(testName, percentile(90.0)),
@@ -118,10 +121,10 @@ object LatencySpec extends MultiNodeConfig {
   }
 
   final case class TestSettings(
-    testName: String,
+    testName:    String,
     messageRate: Int, // msg/s
     payloadSize: Int,
-    repeat: Int)
+    repeat:      Int)
 
 }
 
