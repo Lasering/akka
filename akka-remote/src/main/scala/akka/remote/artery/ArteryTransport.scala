@@ -8,6 +8,7 @@ import java.net.InetSocketAddress
 import java.nio.channels.DatagramChannel
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeUnit.MICROSECONDS
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
@@ -439,25 +440,30 @@ private[remote] class ArteryTransport(_system: ExtendedActorSystem, _provider: R
       if (remoteSettings.AeronDirectoryName.nonEmpty)
         driverContext.aeronDirectoryName(remoteSettings.AeronDirectoryName)
       // FIXME settings from config
-      driverContext.conductorIdleStrategy()
       driverContext.clientLivenessTimeoutNs(SECONDS.toNanos(20))
       driverContext.imageLivenessTimeoutNs(SECONDS.toNanos(20))
       driverContext.driverTimeoutMs(SECONDS.toNanos(20))
 
-      if (remoteSettings.IdleCpuLevel == 10) {
+      val idleCpuLevel = remoteSettings.IdleCpuLevel
+      if (idleCpuLevel == 10) {
         driverContext
           .threadingMode(ThreadingMode.DEDICATED)
           .conductorIdleStrategy(new BackoffIdleStrategy(1, 1, 1, 1))
-          .receiverIdleStrategy(new BusySpinIdleStrategy)
-          .senderIdleStrategy(new BusySpinIdleStrategy);
-      } else if (remoteSettings.IdleCpuLevel == 1) {
+          .receiverIdleStrategy(TaskRunner.createIdleStrategy(idleCpuLevel))
+          .senderIdleStrategy(TaskRunner.createIdleStrategy(idleCpuLevel))
+      } else if (idleCpuLevel == 1) {
         driverContext
           .threadingMode(ThreadingMode.SHARED)
-        //FIXME measure: .sharedIdleStrategy(new BackoffIdleStrategy(20, 50, 1, 200))
-      } else if (remoteSettings.IdleCpuLevel <= 5) {
+          .sharedIdleStrategy(TaskRunner.createIdleStrategy(idleCpuLevel))
+      } else if (idleCpuLevel <= 7) {
         driverContext
           .threadingMode(ThreadingMode.SHARED_NETWORK)
-        //FIXME measure: .sharedNetworkIdleStrategy(new BackoffIdleStrategy(20, 50, 1, 20 * (11 - remoteSettings.IdleCpuLevel)))
+          .sharedNetworkIdleStrategy(TaskRunner.createIdleStrategy(idleCpuLevel))
+      } else {
+        driverContext
+          .threadingMode(ThreadingMode.DEDICATED)
+          .receiverIdleStrategy(TaskRunner.createIdleStrategy(idleCpuLevel))
+          .senderIdleStrategy(TaskRunner.createIdleStrategy(idleCpuLevel))
       }
 
       val driver = MediaDriver.launchEmbedded(driverContext)

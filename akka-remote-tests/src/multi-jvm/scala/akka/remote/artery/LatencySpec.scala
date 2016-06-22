@@ -27,7 +27,7 @@ object LatencySpec extends MultiNodeConfig {
 
   commonConfig(debugConfig(on = false).withFallback(
     ConfigFactory.parseString(s"""
-       # for serious measurements you should increase the totalMessagesFactor (10) and repeatCount (3)
+       # for serious measurements you should increase the totalMessagesFactor (30) and repeatCount (3)
        akka.test.LatencySpec.totalMessagesFactor = 1.0
        akka.test.LatencySpec.repeatCount = 1
        akka {
@@ -42,7 +42,7 @@ object LatencySpec extends MultiNodeConfig {
          }
          remote.artery {
            enabled = on
-           advanced.idle-cpu-level=8
+           advanced.idle-cpu-level=7
          }
        }
        """)))
@@ -121,10 +121,10 @@ object LatencySpec extends MultiNodeConfig {
   }
 
   final case class TestSettings(
-    testName:    String,
+    testName: String,
     messageRate: Int, // msg/s
     payloadSize: Int,
-    repeat:      Int)
+    repeat: Int)
 
 }
 
@@ -189,17 +189,18 @@ abstract class LatencySpec
       testName = "rate-10000-size-100",
       messageRate = 10000,
       payloadSize = 100,
-      repeat = repeatCount),
-    TestSettings(
-      testName = "rate-20000-size-100",
-      messageRate = 20000,
-      payloadSize = 100,
-      repeat = repeatCount),
-    TestSettings(
-      testName = "rate-1000-size-1k",
-      messageRate = 1000,
-      payloadSize = 1000,
       repeat = repeatCount))
+  //    TestSettings(
+  //      testName = "rate-20000-size-100",
+  //      messageRate = 20000,
+  //      payloadSize = 100,
+  //      repeat = repeatCount))
+  //        ,
+  //      TestSettings(
+  //        testName = "rate-1000-size-1k",
+  //        messageRate = 1000,
+  //        payloadSize = 1000,
+  //        repeat = repeatCount))
 
   def test(testSettings: TestSettings): Unit = {
     import testSettings._

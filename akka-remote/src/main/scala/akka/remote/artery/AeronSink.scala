@@ -5,7 +5,6 @@ package akka.remote.artery
 
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.annotation.tailrec
 import scala.concurrent.Future
 import scala.concurrent.Promise
@@ -14,7 +13,6 @@ import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
 import scala.util.control.NoStackTrace
-
 import akka.Done
 import akka.stream.Attributes
 import akka.stream.Inlet
@@ -26,6 +24,7 @@ import akka.stream.stage.InHandler
 import io.aeron.Aeron
 import io.aeron.Publication
 import org.agrona.concurrent.UnsafeBuffer
+import org.agrona.hints.ThreadHints
 
 object AeronSink {
 
@@ -95,8 +94,8 @@ class AeronSink(
 
       private var completedValue: Try[Done] = Success(Done)
 
-      // FIXME measure and adjust with IdleCpuLevel
-      private val spinning = 1000
+      // spin between 2 to 20 depending on idleCpuLevel
+      private val spinning = 2 * taskRunner.idleCpuLevel
       private var backoffCount = spinning
       private var lastMsgSize = 0
       private val offerTask = new OfferTask(pub, null, lastMsgSize, getAsyncCallback(_ ⇒ taskOnOfferSuccess()),
@@ -105,6 +104,7 @@ class AeronSink(
 
       private var offerTaskInProgress = false
       private var delegateTaskStartTime = 0L
+      private var countBeforeDelegate = 0L
 
       private val channelMetadata = channel.getBytes("US-ASCII")
 
@@ -136,10 +136,10 @@ class AeronSink(
       @tailrec private def publish(): Unit = {
         val result = pub.offer(envelopeInFlight.aeronBuffer, 0, lastMsgSize)
         // FIXME handle Publication.CLOSED
-        // TODO the backoff strategy should be measured and tuned
         if (result < 0) {
           backoffCount -= 1
           if (backoffCount > 0) {
+            ThreadHints.onSpinWait()
             publish() // recursive
           } else {
             // delegate backoff to shared TaskRunner
@@ -149,14 +149,16 @@ class AeronSink(
             offerTask.msgSize = lastMsgSize
             delegateTaskStartTime = System.nanoTime()
             taskRunner.command(addOfferTask)
-            flightRecorder.hiFreq(AeronSink_DelegateToTaskRunner, lastMsgSize)
+            flightRecorder.hiFreq(AeronSink_DelegateToTaskRunner, countBeforeDelegate)
           }
         } else {
+          countBeforeDelegate += 1
           onOfferSuccess()
         }
       }
 
       private def taskOnOfferSuccess(): Unit = {
+        countBeforeDelegate = 0
         flightRecorder.hiFreq(AeronSink_ReturnFromTaskRunner, System.nanoTime() - delegateTaskStartTime)
         onOfferSuccess()
       }
