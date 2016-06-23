@@ -22,7 +22,7 @@ object HandshakeShouldDropCompressionTableSpec {
   val commonConfig = ConfigFactory.parseString(s"""
      akka {
        loglevel = INFO
-        
+
        actor.provider = "akka.remote.RemoteActorRefProvider"
        remote.artery.enabled = on
        remote.artery.advanced {
@@ -32,7 +32,7 @@ object HandshakeShouldDropCompressionTableSpec {
        remote.artery.hostname = localhost
        remote.artery.port = 0
        remote.handshake-timeout = 10s
-       
+
      }
   """)
 
@@ -59,8 +59,7 @@ class HandshakeShouldDropCompressionTableSpec extends AkkaSpec(HandshakeShouldDr
       // listen for compression table events
       val aProbe = TestProbe()
       val a1Probe = TestProbe()
-      val aNew2Probe = TestProbe()
-      val b1Probe = TestProbe()
+      val b1Probe = TestProbe()(systemB)
       system.eventStream.subscribe(aProbe.ref, classOf[CompressionProtocol.Events.Event])
       systemB.eventStream.subscribe(b1Probe.ref, classOf[CompressionProtocol.Events.Event])
 
@@ -89,17 +88,21 @@ class HandshakeShouldDropCompressionTableSpec extends AkkaSpec(HandshakeShouldDr
       Thread.sleep(5000)
       log.warning("SYSTEM READY {}...", systemB)
 
+      val aNewProbe = TestProbe()
+      system.eventStream.subscribe(aNewProbe.ref, classOf[CompressionProtocol.Events.Event])
+
       systemB.actorOf(TestActors.blackholeProps, "void") // start it again
       (1 to messagesToExchange).foreach { i ⇒ voidSel ! "hello" } // does not reply, but a hot receiver should be advertised
       // compression triggered again
-      val a2 = aProbe.expectMsgType[Events.ReceivedCompressionAdvertisement](10.seconds)
+      val a2 = aNewProbe.expectMsgType[Events.ReceivedCompressionAdvertisement](10.seconds)
       info("System [A] received: " + a2)
       a2.id should ===(1)
       a2.key.toString should include(testActor.path.name)
 
+      val aNew2Probe = TestProbe()
       (1 to messagesToExchange).foreach { i ⇒ voidSel.tell("hello", aNew2Probe.ref) } // does not reply, but a hot receiver should be advertised
       // compression triggered again
-      val a3 = aProbe.expectMsgType[Events.ReceivedCompressionAdvertisement](10.seconds)
+      val a3 = aNewProbe.expectMsgType[Events.ReceivedCompressionAdvertisement](10.seconds)
       info("Received second compression: " + a3)
       a3.id should ===(2)
       a3.key.toString should include(aNew2Probe.ref.path.name)
