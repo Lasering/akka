@@ -10,12 +10,10 @@ import akka.event.Logging
 final class InboundActorRefCompressionTable(
   system:                   ActorSystem,
   heavyHitters:             TopHeavyHitters[ActorRef],
-  onNewHeavyHitterDetected: AdvertiseCompressionId[ActorRef]
-) extends InboundCompressionTable[ActorRef](system, heavyHitters, _.path.toSerializationFormat, onNewHeavyHitterDetected) {
+  onNewHeavyHitterDetected: AdvertiseCompressionId[ActorRef]) extends InboundCompressionTable[ActorRef](system, heavyHitters, _.path.toSerializationFormat, onNewHeavyHitterDetected) {
 
   preAllocate(
-    system.deadLetters
-  )
+    system.deadLetters)
 
   /* Since the table is empty here, anything we increment here becomes a heavy hitter immediately. */
   def preAllocate(allocations: ActorRef*): Unit = {
@@ -105,7 +103,7 @@ class InboundCompressionTable[T](
     key match {
       case null ⇒ true
       case ""   ⇒ true // empty class manifest for example
-      case _    ⇒ key.endsWith("/system/dummy") || key.endsWith("/") // TODO dummy likely shouldn't exist? can we remove it?
+      case _    ⇒ key.endsWith("/")
     }
   }
 
